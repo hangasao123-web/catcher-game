@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Ultimate Catcher - Game Over Pro</title>
+    <style>
+        :root {
+            --bg: #f8f9fa;
+            --card: #ffffff;
+            --text: #1d1d1f;
+            --primary: #5e5ce6;
+            --danger: #ff3b30;
+            --success: #34c759;
+            --shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+
+        [data-theme="dark"] {
+            --bg: #000000;
+            --card: #1c1c1e;
+            --text: #ffffff;
+            --shadow: 0 10px 40px rgba(0,0,0,0.5);
+        }
+
+        body {
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, system-ui, sans-serif;
+            transition: 0.5s;
+            overflow: hidden;
+            /* Ngăn chặn hành động vuốt mặc định của trình duyệt để tránh lag game */
+            touch-action: none; 
+        }
+
+        /* Nút chức năng */
+        .nav-buttons {
+            position: absolute;
+            top: 15px; right: 15px;
+            display: flex; gap: 8px; z-index: 100;
+        }
+
+        .btn-ui {
+            border: none; padding: 8px 15px; border-radius: 20px;
+            background: var(--card); color: var(--text);
+            font-weight: 600; cursor: pointer; box-shadow: var(--shadow);
+            border: 1px solid rgba(128,128,128,0.2);
+            font-size: 13px;
+        }
+
+        /* Khung Game Tối ưu Mobile */
+        #game-box {
+            position: relative;
+            background: var(--card);
+            border-radius: 24px;
+            box-shadow: var(--shadow);
+            border: 1px solid rgba(128,128,128,0.1);
+            overflow: hidden;
+            width: 95vw;
+            max-width: 420px;
+            height: 85vh;
+            max-height: 700px;
+        }
+
+        canvas { 
+            display: block; 
+            width: 100%; 
+            height: 100%;
+            touch-action: none;
+        }
+
+        /* HUD: Điểm và Mạng */
+        .hud {
+            position: absolute; top: 20px; left: 15px; right: 15px;
+            display: flex; justify-content: space-between; pointer-events: none;
+        }
+
+        .hud-item {
+            background: rgba(128, 128, 128, 0.15);
+            backdrop-filter: blur(15px);
+            padding: 6px 14px; border-radius: 12px; font-weight: 800;
+            font-size: 14px;
+        }
+
+        /* Màn hình Overlay */
+        .overlay {
+            position: absolute; inset: 0;
+            background: var(--card);
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            z-index: 50; text-align: center; padding: 20px;
+        }
+
+        .death-title { color: var(--danger); font-size: 32px; margin-bottom: 5px; }
+        .score-display { font-size: 18px; opacity: 0.7; margin-bottom: 25px; }
+
+        .btn-play {
+            width: 80%; max-width: 250px; padding: 14px; margin: 6px; border: none;
+            border-radius: 18px; color: white; font-weight: 700;
+            font-size: 15px; cursor: pointer; transition: 0.2s;
+        }
+
+        .btn-easy { background: var(--success); }
+        .btn-normal { background: var(--primary); }
+        .btn-hard { background: var(--danger); }
+
+        #pause-screen {
+            position: absolute; inset: 0;
+            background: rgba(0,0,0,0.4); backdrop-filter: blur(5px);
+            display: none; align-items: center; justify-content: center;
+            color: white; font-size: 22px; font-weight: 900; z-index: 40;
+        }
+    </style>
+</head>
+<body data-theme="light">
+
+    <div class="nav-buttons">
+        <button class="btn-ui" onclick="togglePause()">⏸</button>
+        <button class="btn-ui" onclick="toggleTheme()">🌗</button>
+    </div>
+
+    <div id="game-box">
+        <canvas id="gameCanvas"></canvas>
+        <div id="pause-screen">GAME PAUSED</div>
+
+        <div class="hud">
+            <div class="hud-item">SCORE: <span id="scoreVal">0</span></div>
+            <div class="hud-item" id="livesVal">❤️❤️❤️</div>
+        </div>
+
+        <div id="statusOverlay" class="overlay">
+            <h1 id="statusTitle" style="margin-bottom: 5px;">Catcher Pro</h1>
+            <p id="statusDesc" style="opacity: 0.7; margin-bottom: 20px;">Hứng 🟢, Né 🟡. Vuốt để di chuyển!</p>
+            
+            <div id="modeSelection" style="width: 100%; display: flex; flex-direction: column; align-items: center;">
+                <button class="btn-play btn-easy" onclick="startGame('easy')">Chế độ Dễ</button>
+                <button class="btn-play btn-normal" onclick="startGame('normal')">Chế độ Thường</button>
+                <button class="btn-play btn-hard" onclick="startGame('hard')">Chế độ Khó</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const statusOverlay = document.getElementById("statusOverlay");
+        const statusTitle = document.getElementById("statusTitle");
+        const statusDesc = document.getElementById("statusDesc");
+        const pauseScreen = document.getElementById("pause-screen");
+        
+        // Tự động điều chỉnh kích thước Canvas theo khung hiển thị
+        function resize() {
+            const rect = canvas.parentNode.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+            paddle.y = canvas.height - 50;
+        }
+
+        let score = 0, lives = 3, isRunning = false, isPaused = false;
+        let paddle = { x: 0, y: 0, w: 80, h: 12, speed: 12 };
+        let balls = [], keys = {}, difficulty = 'normal';
+
+        const configs = {
+            easy: { speed: 3, freq: 0.015 },
+            normal: { speed: 5, freq: 0.022 },
+            hard: { speed: 8, freq: 0.03 }
+        };
+
+        // --- XỬ LÝ ĐIỀU KHIỂN ---
+        
+        // Bàn phím
+        document.addEventListener("keydown", e => {
+            keys[e.code] = true;
+            if (e.code === "Space") togglePause();
+        });
+        document.addEventListener("keyup", e => keys[e.code] = false);
+
+        // Cảm ứng (Touch Events)
+        canvas.addEventListener("touchmove", e => {
+            if (!isRunning || isPaused) return;
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            const touchX = touch.clientX - rect.left;
+            
+            // Đặt tâm của paddle vào vị trí ngón tay
+            paddle.x = touchX - paddle.w / 2;
+
+            // Giới hạn trong canvas
+            if (paddle.x < 0) paddle.x = 0;
+            if (paddle.x > canvas.width - paddle.w) paddle.x = canvas.width - paddle.w;
+        }, { passive: false });
+
+        function toggleTheme() {
+            const body = document.body;
+            body.setAttribute("data-theme", body.getAttribute("data-theme") === "light" ? "dark" : "light");
+        }
+
+        function togglePause() {
+            if (!isRunning) return;
+            isPaused = !isPaused;
+            pauseScreen.style.display = isPaused ? "flex" : "none";
+            if (!isPaused) gameLoop();
+        }
+
+        function startGame(mode) {
+            resize();
+            difficulty = mode;
+            score = 0; lives = 3; balls = [];
+            paddle.x = (canvas.width - paddle.w) / 2;
+            isRunning = true; isPaused = false;
+            statusOverlay.style.display = "none";
+            updateUI();
+            gameLoop();
+        }
+
+        function spawnBall() {
+            const conf = configs[difficulty];
+            if (Math.random() < conf.freq) {
+                const isYellow = Math.random() < 0.2;
+                balls.push({
+                    x: Math.random() * (canvas.width - 30) + 15,
+                    y: -20, r: 12, speed: conf.speed + (Math.random() * 2),
+                    type: isYellow ? 'yellow' : 'green'
+                });
+            }
+        }
+
+        function update() {
+            if (!isRunning || isPaused) return;
+
+            // Di chuyển bằng phím
+            if (keys["ArrowLeft"] && paddle.x > 0) paddle.x -= paddle.speed;
+            if (keys["ArrowRight"] && paddle.x < canvas.width - paddle.w) paddle.x += paddle.speed;
+
+            for (let i = 0; i < balls.length; i++) {
+                balls[i].y += balls[i].speed;
+
+                // Va chạm paddle
+                if (balls[i].y + balls[i].r > paddle.y && 
+                    balls[i].y < paddle.y + paddle.h &&
+                    balls[i].x + balls[i].r > paddle.x && 
+                    balls[i].x - balls[i].r < paddle.x + paddle.w) {
+                    
+                    if (balls[i].type === 'yellow') {
+                        lives--;
+                    } else {
+                        score += 10;
+                    }
+                    balls.splice(i, 1); i--;
+                    updateUI();
+                    if (lives <= 0) handleGameOver();
+                    continue;
+                }
+
+                // Rơi xuống
+                if (balls[i].y - balls[i].r > canvas.height) {
+                    if (balls[i].type === 'green') {
+                        lives--;
+                        updateUI();
+                    }
+                    balls.splice(i, 1); i--;
+                    if (lives <= 0) handleGameOver();
+                }
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const style = getComputedStyle(document.documentElement);
+
+            // Vẽ Paddle
+            ctx.fillStyle = style.getPropertyValue('--text');
+            ctx.beginPath();
+            if(ctx.roundRect) {
+                ctx.roundRect(paddle.x, paddle.y, paddle.w, paddle.h, 6);
+            } else {
+                ctx.rect(paddle.x, paddle.y, paddle.w, paddle.h);
+            }
+            ctx.fill();
+
+            // Vẽ Bóng
+            balls.forEach(b => {
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+                ctx.fillStyle = b.type === 'yellow' ? "#ffcc00" : "#34c759";
+                ctx.fill();
+                // Hiệu ứng bóng đổ nhẹ cho quả bóng
+                ctx.fillStyle = "rgba(0,0,0,0.1)";
+                ctx.arc(b.x, b.y, b.r-2, 0, Math.PI * 2);
+            });
+        }
+
+        function updateUI() {
+            document.getElementById("scoreVal").innerText = score;
+            document.getElementById("livesVal").innerText = lives > 0 ? "❤️".repeat(lives) : "💀";
+        }
+
+        function handleGameOver() {
+            isRunning = false;
+            statusOverlay.style.display = "flex";
+            statusTitle.className = "death-title";
+            statusTitle.innerText = "THẤT BẠI!";
+            statusDesc.innerHTML = `<div class="score-display">Điểm của bạn: <b>${score}</b></div>CHỌN CHẾ ĐỘ ĐỂ CHƠI LẠI`;
+        }
+
+        function gameLoop() {
+            if (!isRunning || isPaused) return;
+            spawnBall();
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Khởi tạo kích thước ban đầu
+        window.addEventListener('resize', resize);
+        resize();
+        draw();
+    </script>
+</body>
+</html>
